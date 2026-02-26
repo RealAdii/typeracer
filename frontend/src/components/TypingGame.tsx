@@ -1,0 +1,583 @@
+"use client";
+
+import { useState, useEffect, useRef, useCallback } from "react";
+import { usePrivy } from "@privy-io/react-auth";
+import { StarkSDK } from "starkzap";
+import type { WalletInterface } from "starkzap";
+import ChallengeText from "./ChallengeText";
+import TransactionLog from "./TransactionLog";
+import RaceResults from "./RaceResults";
+import Leaderboard from "./Leaderboard";
+import WalletStatus from "./WalletStatus";
+import { useTypingContract } from "@/hooks/use-typing-contract";
+import { generateChallenge, type GeneratedChallenge } from "@/lib/challenges";
+import {
+  API_URL,
+  GAME_CONFIG,
+  STORAGE_KEYS,
+} from "@/lib/constants";
+
+type GameState = "idle" | "countdown" | "racing" | "finished";
+
+export default function TypingGame() {
+  const { ready, authenticated, user, login, logout, getAccessToken } =
+    usePrivy();
+
+  // Wallet state
+  const [wallet, setWallet] = useState<WalletInterface | null>(null);
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const sdkRef = useRef<StarkSDK | null>(null);
+
+  // Game state
+  const [gameState, setGameState] = useState<GameState>("idle");
+  const [challenge, setChallenge] = useState<GeneratedChallenge | null>(null);
+  const [countdown, setCountdown] = useState(3);
+  const [startTime, setStartTime] = useState(0);
+  const [currentWpm, setCurrentWpm] = useState(0);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [finishResult, setFinishResult] = useState<{
+    hash: string;
+    explorerUrl: string;
+  } | null>(null);
+  const [previousBest, setPreviousBest] = useState(0);
+
+  // Word-level state
+  const [currentWordIndex, setCurrentWordIndex] = useState(0);
+  const [currentInput, setCurrentInput] = useState("");
+  const [completedWords, setCompletedWords] = useState(0);
+  const [wordResults, setWordResults] = useState<
+    Array<"correct" | "incorrect" | "pending">
+  >([]);
+  const [timeRemaining, setTimeRemaining] = useState(
+    GAME_CONFIG.RACE_DURATION_SECONDS
+  );
+  const [wpmHistory, setWpmHistory] = useState<
+    Array<{ time: number; wpm: number }>
+  >([]);
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  const gameStateRef = useRef<GameState>("idle");
+  const completedWordsRef = useRef(0);
+  const currentWordIndexRef = useRef(0);
+  const wordResultsRef = useRef<Array<"correct" | "incorrect" | "pending">>([]);
+  const startTimeRef = useRef(0);
+
+  // Keep refs in sync
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+  useEffect(() => {
+    completedWordsRef.current = completedWords;
+  }, [completedWords]);
+  useEffect(() => {
+    currentWordIndexRef.current = currentWordIndex;
+  }, [currentWordIndex]);
+  useEffect(() => {
+    wordResultsRef.current = wordResults;
+  }, [wordResults]);
+  useEffect(() => {
+    startTimeRef.current = startTime;
+  }, [startTime]);
+
+  const {
+    startRace,
+    recordWord,
+    finishRace,
+    txLog,
+    clearLog,
+    isStarting,
+    isFinishing,
+    successCount,
+    pendingCount,
+    isReady,
+  } = useTypingContract({ wallet });
+
+  // ─── Wallet Setup (Privy → Starkzap) ───
+  useEffect(() => {
+    if (!ready || !authenticated || !user?.id || wallet) return;
+
+    const setupWallet = async () => {
+      try {
+        const token = await getAccessToken();
+        if (!token) return;
+
+        const walletRes = await fetch(`${API_URL}/api/wallet/starknet`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        const walletData = await walletRes.json();
+
+        if (!walletData.wallet) {
+          console.error("No wallet in response:", walletData);
+          return;
+        }
+
+        const { id: walletId, publicKey } = walletData.wallet;
+
+        localStorage.setItem(STORAGE_KEYS.walletId, walletId);
+        localStorage.setItem(STORAGE_KEYS.publicKey, publicKey);
+
+        if (!sdkRef.current) {
+          sdkRef.current = new StarkSDK({
+            network: "sepolia",
+            paymaster: {
+              nodeUrl: `${API_URL}/api/paymaster`,
+            },
+          });
+        }
+
+        const result = await sdkRef.current.onboard({
+          strategy: "privy",
+          privy: {
+            resolve: async () => ({
+              walletId,
+              publicKey,
+              serverUrl: `${API_URL}/api/wallet/sign`,
+            }),
+          },
+          deploy: "if_needed",
+          feeMode: "sponsored",
+        });
+
+        setWallet(result.wallet);
+        setWalletAddress(result.wallet.address);
+        localStorage.setItem(
+          STORAGE_KEYS.walletAddress,
+          result.wallet.address
+        );
+      } catch (err) {
+        console.error("Wallet setup failed:", err);
+      }
+    };
+
+    setupWallet();
+  }, [ready, authenticated, user?.id, wallet, getAccessToken]);
+
+  // ─── Countdown Timer ───
+  useEffect(() => {
+    if (gameState !== "countdown") return;
+
+    if (countdown <= 0) {
+      setGameState("racing");
+      setStartTime(Date.now());
+      setTimeout(() => inputRef.current?.focus(), 50);
+      return;
+    }
+
+    const timer = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [gameState, countdown]);
+
+  // ─── 30-Second Race Timer ───
+  useEffect(() => {
+    if (gameState !== "racing") return;
+
+    const timer = setInterval(() => {
+      setTimeRemaining((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          // Use refs to avoid stale closures
+          doFinishRace();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [gameState]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Real-time WPM ───
+  useEffect(() => {
+    if (gameState !== "racing") return;
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - startTimeRef.current;
+      if (elapsed <= 0) return;
+      const minutes = elapsed / 60000;
+      setCurrentWpm(Math.round(completedWordsRef.current / minutes) || 0);
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [gameState]);
+
+  // ─── WPM Sampling for Graph ───
+  useEffect(() => {
+    if (gameState !== "racing") return;
+
+    const interval = setInterval(() => {
+      if (gameStateRef.current !== "racing") return;
+      const elapsed = Date.now() - startTimeRef.current;
+      if (elapsed <= 0) return;
+      const minutes = elapsed / 60000;
+      const wpm = Math.round(completedWordsRef.current / minutes) || 0;
+      setWpmHistory((prev) => [
+        ...prev,
+        { time: Math.round(elapsed / 1000), wpm },
+      ]);
+    }, GAME_CONFIG.WPM_SAMPLE_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [gameState]);
+
+  // ─── Finish Race (ref-safe for timer callback) ───
+  const doFinishRace = useCallback(async () => {
+    if (gameStateRef.current === "finished") return;
+    setGameState("finished");
+
+    const elapsed = Date.now() - startTimeRef.current;
+    const minutes = elapsed / 60000;
+    const finalWpm =
+      Math.round(completedWordsRef.current / minutes) || 0;
+    setCurrentWpm(finalWpm);
+
+    // Add final sample
+    setWpmHistory((prev) => [
+      ...prev,
+      { time: Math.round(elapsed / 1000), wpm: finalWpm },
+    ]);
+
+    // Calculate correct chars for on-chain finish
+    const results = wordResultsRef.current;
+    const idx = currentWordIndexRef.current;
+    let correctCharCount = 0;
+    let totalCharCount = 0;
+
+    if (challenge) {
+      for (let i = 0; i < idx; i++) {
+        const wordLen = challenge.words[i].length;
+        totalCharCount += wordLen;
+        if (results[i] === "correct") {
+          correctCharCount += wordLen;
+        }
+      }
+    }
+
+    // Calculate accuracy as percentage
+    const finalAccuracy = idx > 0 ? Math.round((completedWordsRef.current / idx) * 100) : 100;
+
+    const result = await finishRace(
+      Math.max(correctCharCount, 0),
+      Math.max(totalCharCount, 1),
+      finalWpm,
+      finalAccuracy
+    );
+    if (result) {
+      setFinishResult(result);
+    }
+  }, [challenge, finishRace]);
+
+  // ─── Start Race ───
+  const handleStartRace = useCallback(async () => {
+    const ch = generateChallenge();
+    setChallenge(ch);
+    setCurrentWordIndex(0);
+    setCurrentInput("");
+    setCompletedWords(0);
+    setWordResults(ch.words.map(() => "pending" as const));
+    setTimeRemaining(GAME_CONFIG.RACE_DURATION_SECONDS);
+    setWpmHistory([]);
+    clearLog();
+    setFinishResult(null);
+    setCurrentWpm(0);
+    setCountdown(GAME_CONFIG.COUNTDOWN_SECONDS);
+    setGameState("countdown");
+
+    const raceId = await startRace(0);
+    if (!raceId && raceId !== "0") {
+      console.warn("On-chain start_race failed, continuing locally");
+    }
+  }, [startRace, clearLog]);
+
+  // ─── Handle Keystroke (word-level) ───
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (gameState !== "racing" || !challenge) return;
+
+      if (
+        ["Shift", "Control", "Alt", "Meta", "Tab", "Escape", "CapsLock"].includes(
+          e.key
+        )
+      )
+        return;
+
+      e.preventDefault();
+
+      if (e.key === "Backspace") {
+        setCurrentInput((prev) => prev.slice(0, -1));
+        return;
+      }
+
+      if (e.key === " ") {
+        if (currentInput.length === 0) return;
+
+        const expectedWord = challenge.words[currentWordIndex];
+        const isCorrect = currentInput === expectedWord;
+
+        setWordResults((prev) => {
+          const next = [...prev];
+          next[currentWordIndex] = isCorrect ? "correct" : "incorrect";
+          return next;
+        });
+
+        if (isCorrect) {
+          const newCompleted = completedWords + 1;
+          setCompletedWords(newCompleted);
+          recordWord(newCompleted);
+        }
+
+        setCurrentWordIndex(currentWordIndex + 1);
+        setCurrentInput("");
+        return;
+      }
+
+      // Only printable characters
+      if (e.key.length !== 1) return;
+
+      setCurrentInput((prev) => prev + e.key);
+    },
+    [
+      gameState,
+      challenge,
+      currentInput,
+      currentWordIndex,
+      completedWords,
+      recordWord,
+      doFinishRace,
+    ]
+  );
+
+  // ─── Computed Values ───
+  const accuracy =
+    currentWordIndex > 0
+      ? Math.round((completedWords / currentWordIndex) * 100)
+      : 100;
+  const elapsed = startTime ? Date.now() - startTime : 0;
+  const isNewBest = currentWpm > previousBest && previousBest > 0;
+
+  // ─── Render ───
+  return (
+    <>
+      {/* Header */}
+      <div className="header">
+        <h1>TypeRacer</h1>
+        <div className="subtitle">
+          Every word is a transaction on Starknet
+        </div>
+      </div>
+
+      {/* Wallet Status */}
+      <WalletStatus
+        isAuthenticated={authenticated}
+        walletAddress={walletAddress}
+        walletReady={isReady}
+        onLogin={login}
+        onLogout={async () => {
+          if (wallet) {
+            try {
+              await wallet.disconnect();
+            } catch {}
+          }
+          setWallet(null);
+          setWalletAddress(null);
+          sdkRef.current = null;
+          localStorage.removeItem(STORAGE_KEYS.walletId);
+          localStorage.removeItem(STORAGE_KEYS.walletAddress);
+          localStorage.removeItem(STORAGE_KEYS.publicKey);
+          logout();
+        }}
+      />
+
+      {/* Main Game Area */}
+      <div className="game-area">
+        <div className="game-main">
+          {/* Idle State */}
+          {gameState === "idle" && (
+            <div className="idle-screen">
+              <h2>Ready to Race?</h2>
+              <p>
+                Type as fast as you can for 30 seconds. Every completed word
+                fires an on-chain transaction on Starknet. Your WPM score is
+                provably recorded on the blockchain.
+              </p>
+
+              {!authenticated && (
+                <div style={{ marginBottom: 24 }}>
+                  <button className="btn btn-large" onClick={login}>
+                    Connect to Start
+                  </button>
+                </div>
+              )}
+
+              {authenticated && (
+                <button
+                  className="btn btn-large"
+                  onClick={handleStartRace}
+                  disabled={isStarting || !isReady}
+                >
+                  {isStarting ? (
+                    <>
+                      <span className="spinner" /> Starting Race...
+                    </>
+                  ) : !isReady ? (
+                    <>
+                      <span className="spinner" /> Wallet Loading...
+                    </>
+                  ) : (
+                    "Start Race"
+                  )}
+                </button>
+              )}
+
+              <div style={{ marginTop: 24 }}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setShowLeaderboard(true)}
+                >
+                  View Leaderboard
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Countdown */}
+          {gameState === "countdown" && (
+            <div className="countdown">
+              <div className="countdown-number" key={countdown}>
+                {countdown > 0 ? countdown : "GO!"}
+              </div>
+            </div>
+          )}
+
+          {/* Racing */}
+          {gameState === "racing" && challenge && (
+            <>
+              <div className="stats-bar">
+                <div className="stat">
+                  <div className="stat-label">Time</div>
+                  <div
+                    className={`stat-value highlight ${timeRemaining <= 5 ? "timer-critical" : ""}`}
+                  >
+                    {timeRemaining}s
+                  </div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">WPM</div>
+                  <div className="stat-value highlight">{currentWpm}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Words</div>
+                  <div className="stat-value">{completedWords}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">On-Chain TXs</div>
+                  <div
+                    className="stat-value"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    {successCount}
+                  </div>
+                </div>
+              </div>
+
+              <ChallengeText
+                words={challenge.words}
+                wordResults={wordResults}
+                currentWordIndex={currentWordIndex}
+                currentInput={currentInput}
+              />
+
+              <input
+                ref={inputRef}
+                className="hidden-input"
+                onKeyDown={handleKeyDown}
+                autoFocus
+                aria-label="Type here"
+              />
+
+              <div
+                style={{
+                  textAlign: "center",
+                  marginTop: 20,
+                  color: "var(--text-dim)",
+                  fontSize: "0.75rem",
+                }}
+              >
+                {currentWordIndex === 0 && currentInput.length === 0
+                  ? "Start typing..."
+                  : `${completedWords} words completed`}
+              </div>
+            </>
+          )}
+
+          {/* Finished */}
+          {gameState === "finished" && challenge && (
+            <RaceResults
+              wpm={currentWpm}
+              accuracy={accuracy}
+              totalWords={currentWordIndex}
+              correctWords={completedWords}
+              txSuccess={successCount}
+              txTotal={txLog.length}
+              finishTxHash={finishResult?.hash}
+              finishExplorerUrl={finishResult?.explorerUrl}
+              isNewBest={isNewBest}
+              elapsedMs={elapsed}
+              wpmHistory={wpmHistory}
+              onRaceAgain={() => {
+                setGameState("idle");
+                setCurrentInput("");
+                setCurrentWordIndex(0);
+                setCompletedWords(0);
+              }}
+              onViewLeaderboard={() => setShowLeaderboard(true)}
+            />
+          )}
+        </div>
+
+        {/* Transaction Log Sidebar */}
+        <TransactionLog
+          txLog={txLog}
+          pendingCount={pendingCount}
+          successCount={successCount}
+        />
+      </div>
+
+      {/* Footer */}
+      <div className="footer">
+        Powered by{" "}
+        <a
+          href="https://github.com/0xsisyfos/starkzap"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Starkzap SDK
+        </a>{" "}
+        | Deployed on{" "}
+        <a
+          href="https://www.starknet.io"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Starknet
+        </a>{" "}
+        | Auth by{" "}
+        <a
+          href="https://privy.io"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Privy
+        </a>
+      </div>
+
+      {/* Leaderboard Modal */}
+      {showLeaderboard && (
+        <Leaderboard onClose={() => setShowLeaderboard(false)} />
+      )}
+    </>
+  );
+}
