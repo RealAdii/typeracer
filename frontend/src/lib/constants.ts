@@ -1,6 +1,6 @@
 export const NETWORK = process.env.NEXT_PUBLIC_NETWORK || "sepolia";
 export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+  process.env.NEXT_PUBLIC_API_URL || "";
 export const CONTRACT_ADDRESS =
   process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ||
   "0x017ef3adc7dadf087760e0fdbb13eea65c9cde4c8376b9fbaa306b1b64657ea6";
