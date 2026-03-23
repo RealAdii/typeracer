@@ -10,14 +10,25 @@ interface UseTongoOpts {
   walletAddress: string | null;
 }
 
+// Stark curve order
+const STARK_ORDER = BigInt("0x0800000000000010ffffffffffffffffb781126dcae7b2321e66a241adc64d2f");
+
 function getOrCreateTongoKey(): string {
   let pk = localStorage.getItem(STORAGE_KEYS.tongoPrivateKey);
   if (!pk) {
     const bytes = new Uint8Array(32);
     crypto.getRandomValues(bytes);
-    bytes[0] &= 0x0f; // keep within Stark field
-    pk = "0x" + Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+    const raw = BigInt("0x" + Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join(""));
+    // Reduce modulo curve order, ensure >= 1
+    const scalar = (raw % (STARK_ORDER - BigInt(1))) + BigInt(1);
+    pk = "0x" + scalar.toString(16).padStart(64, "0");
     localStorage.setItem(STORAGE_KEYS.tongoPrivateKey, pk);
+  }
+  // Validate existing keys too — if invalid, regenerate
+  const val = BigInt(pk);
+  if (val < BigInt(1) || val >= STARK_ORDER) {
+    localStorage.removeItem(STORAGE_KEYS.tongoPrivateKey);
+    return getOrCreateTongoKey();
   }
   return pk;
 }
