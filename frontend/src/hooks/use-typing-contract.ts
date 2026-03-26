@@ -184,7 +184,15 @@ export function useTypingContract({ wallet, getAccessToken }: UseTypingContractO
         return raceId;
       } catch (err: any) {
         console.error("start_race failed:", err);
-        return null;
+        // Use fallback raceId so keystroke recording + rewards still work
+        const fallbackId = "0";
+        setActiveRaceId(fallbackId);
+        const earlyWords = earlyWordsRef.current;
+        earlyWordsRef.current = [];
+        for (const wordNum of earlyWords) {
+          enqueueWord(wordNum, fallbackId);
+        }
+        return fallbackId;
       } finally {
         setIsStarting(false);
       }
