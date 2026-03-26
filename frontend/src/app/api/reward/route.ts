@@ -129,9 +129,10 @@ export async function POST(req: NextRequest) {
     ]);
 
     // Resource bounds (prices in FRI — STRK's smallest unit)
-    const l1Gas = { maxAmount: BigInt("0x200"), maxPrice: BigInt("0x100000000000") };
-    const l2Gas = { maxAmount: BigInt("0x200000"), maxPrice: BigInt("0x1000000000") };
-    const l1DataGas = { maxAmount: BigInt("0x200"), maxPrice: BigInt("0x100000000000") };
+    // L1 gas price can spike to ~70T FRI, so set max to 500T for headroom
+    const l1Gas = { maxAmount: BigInt("0x200"), maxPrice: BigInt("0x1C6BF52634000") };
+    const l2Gas = { maxAmount: BigInt("0x200000"), maxPrice: BigInt("0x10000000000") };
+    const l1DataGas = { maxAmount: BigInt("0x200"), maxPrice: BigInt("0x1C6BF52634000") };
 
     // Compute transaction hash WITH l1_data_gas
     const txHash = computeInvokeV3Hash({
