@@ -102,9 +102,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "userAddress required" }, { status: 400 });
   }
 
-  const MAX_RETRIES = 3;
-  const INITIAL_DELAY_MS = 3000; // Wait 3s for in-flight keystroke txs to settle
-
   try {
     const innerCalldata = CallData.compile({
       user: userAddress,
@@ -120,98 +117,81 @@ export async function POST(req: NextRequest) {
       ...innerCalldata,
     ];
 
-    // Wait for in-flight keystroke txs to settle before first attempt
-    await new Promise((r) => setTimeout(r, INITIAL_DELAY_MS));
+    // Get nonce and chain ID
+    const chainProvider = new RpcProvider({ nodeUrl: RPC_URL });
+    (chainProvider.channel as any).blockIdentifier = "latest";
+    const [nonce, chainId] = await Promise.all([
+      rpc("starknet_getNonce", {
+        contract_address: ADMIN_ADDRESS,
+        block_id: "latest",
+      }),
+      chainProvider.getChainId(),
+    ]);
 
-    let lastError: any = null;
+    // Resource bounds (prices in FRI — STRK's smallest unit)
+    // L1 gas price can spike to ~70T FRI, so set max to 500T for headroom
+    const l1Gas = { maxAmount: BigInt("0x200"), maxPrice: BigInt("0x1C6BF52634000") };
+    const l2Gas = { maxAmount: BigInt("0x200000"), maxPrice: BigInt("0x10000000000") };
+    const l1DataGas = { maxAmount: BigInt("0x200"), maxPrice: BigInt("0x1C6BF52634000") };
 
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      try {
-        // Get fresh nonce and chain ID on every attempt
-        const chainProvider = new RpcProvider({ nodeUrl: RPC_URL });
-        (chainProvider.channel as any).blockIdentifier = "latest";
-        const [nonce, chainId] = await Promise.all([
-          rpc("starknet_getNonce", {
-            contract_address: ADMIN_ADDRESS,
-            block_id: "latest",
-          }),
-          chainProvider.getChainId(),
-        ]);
+    // Compute transaction hash WITH l1_data_gas
+    const txHash = computeInvokeV3Hash({
+      senderAddress: ADMIN_ADDRESS,
+      calldata: executeCalldata,
+      chainId,
+      nonce,
+      l1Gas,
+      l2Gas,
+      l1DataGas,
+      tip: BigInt(0),
+      paymasterData: [],
+      nonceDAMode: 0,
+      feeDAMode: 0,
+      accountDeploymentData: [],
+    });
 
-        // Resource bounds
-        const l1Gas = { maxAmount: BigInt("0x100"), maxPrice: BigInt("0x100000000000000") };
-        const l2Gas = { maxAmount: BigInt("0x100000"), maxPrice: BigInt("0x1000000000") };
-        const l1DataGas = { maxAmount: BigInt("0x100"), maxPrice: BigInt("0x100000000000000") };
+    // Sign
+    const signature = ec.starkCurve.sign(
+      encode.removeHexPrefix(txHash),
+      encode.removeHexPrefix(ADMIN_PRIVATE_KEY)
+    );
 
-        // Compute transaction hash WITH l1_data_gas
-        const txHash = computeInvokeV3Hash({
-          senderAddress: ADMIN_ADDRESS,
-          calldata: executeCalldata,
-          chainId,
-          nonce,
-          l1Gas,
-          l2Gas,
-          l1DataGas,
-          tip: BigInt(0),
-          paymasterData: [],
-          nonceDAMode: 0,
-          feeDAMode: 0,
-          accountDeploymentData: [],
-        });
+    // Build signed TX
+    const signedTx = {
+      type: "INVOKE" as const,
+      sender_address: ADMIN_ADDRESS,
+      calldata: executeCalldata,
+      version: "0x3" as const,
+      nonce,
+      resource_bounds: {
+        l1_gas: { max_amount: num.toHex(l1Gas.maxAmount), max_price_per_unit: num.toHex(l1Gas.maxPrice) },
+        l2_gas: { max_amount: num.toHex(l2Gas.maxAmount), max_price_per_unit: num.toHex(l2Gas.maxPrice) },
+        l1_data_gas: { max_amount: num.toHex(l1DataGas.maxAmount), max_price_per_unit: num.toHex(l1DataGas.maxPrice) },
+      },
+      signature: [
+        num.toHex(signature.r),
+        num.toHex(signature.s),
+      ],
+      tip: "0x0",
+      paymaster_data: [],
+      account_deployment_data: [],
+      nonce_data_availability_mode: "L1" as const,
+      fee_data_availability_mode: "L1" as const,
+    };
 
-        // Sign
-        const signature = ec.starkCurve.sign(
-          encode.removeHexPrefix(txHash),
-          encode.removeHexPrefix(ADMIN_PRIVATE_KEY)
-        );
+    // Submit
+    const result = await rpc("starknet_addInvokeTransaction", {
+      invoke_transaction: signedTx,
+    });
 
-        // Build signed TX
-        const signedTx = {
-          type: "INVOKE" as const,
-          sender_address: ADMIN_ADDRESS,
-          calldata: executeCalldata,
-          version: "0x3" as const,
-          nonce,
-          resource_bounds: {
-            l1_gas: { max_amount: num.toHex(l1Gas.maxAmount), max_price_per_unit: num.toHex(l1Gas.maxPrice) },
-            l2_gas: { max_amount: num.toHex(l2Gas.maxAmount), max_price_per_unit: num.toHex(l2Gas.maxPrice) },
-            l1_data_gas: { max_amount: num.toHex(l1DataGas.maxAmount), max_price_per_unit: num.toHex(l1DataGas.maxPrice) },
-          },
-          signature: [
-            num.toHex(signature.r),
-            num.toHex(signature.s),
-          ],
-          tip: "0x0",
-          paymaster_data: [],
-          account_deployment_data: [],
-          nonce_data_availability_mode: "L1" as const,
-          fee_data_availability_mode: "L1" as const,
-        };
+    console.log("Reward tx submitted:", result.transaction_hash);
 
-        // Submit
-        const result = await rpc("starknet_addInvokeTransaction", {
-          invoke_transaction: signedTx,
-        });
-
-        console.log(`Reward tx submitted (attempt ${attempt + 1}):`, result.transaction_hash);
-
-        return NextResponse.json({
-          success: true,
-          txHash: result.transaction_hash,
-        });
-      } catch (err: any) {
-        lastError = err;
-        const isNonceError = err.message?.includes("NonceTooOld") || err.message?.includes("Invalid transaction nonce");
-        if (isNonceError && attempt < MAX_RETRIES - 1) {
-          console.warn(`Reward nonce error (attempt ${attempt + 1}), retrying in 2s...`);
-          await new Promise((r) => setTimeout(r, 2000));
-          continue;
-        }
-        throw err;
-      }
-    }
-
-    throw lastError;
+    // Return immediately — don't wait for confirmation
+    // The tx is submitted, the user can track it on Voyager
+    return NextResponse.json({
+      success: true,
+      txHash: result.transaction_hash,
+    });
   } catch (error: any) {
     console.error("distribute_reward failed:", error);
     return NextResponse.json(
