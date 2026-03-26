@@ -241,14 +241,18 @@ export default function TypingGame() {
     else setStrkBalance(0);
   }, [walletAddress]);
 
-  // ─── Load client-side race attempts from localStorage ───
+  // ─── Load client-side race attempts from localStorage, seed from on-chain ───
   useEffect(() => {
     if (!walletAddress) return;
     const key = `typeracer_attempts_${walletAddress.toLowerCase()}`;
-    const stored = localStorage.getItem(key);
-    if (stored) setClientRaceAttempts(parseInt(stored, 10));
-    else setClientRaceAttempts(0);
-  }, [walletAddress]);
+    const stored = parseInt(localStorage.getItem(key) || "0", 10);
+    // Use whichever is higher: localStorage or on-chain count
+    const effective = Math.max(stored, userRaceCount);
+    if (effective > stored) {
+      localStorage.setItem(key, String(effective));
+    }
+    setClientRaceAttempts(effective);
+  }, [walletAddress, userRaceCount]);
 
   // ─── Countdown Timer ───
   useEffect(() => {
