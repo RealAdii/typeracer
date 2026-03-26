@@ -257,7 +257,7 @@ export default function PrivateSend({
                   display: "inline-block",
                   animation: "spin 0.8s linear infinite",
                 }} />
-                {step === "funding" ? "Depositing into privacy pool..." : "Withdrawing to recipient..."}
+                this will just take a second :)
               </div>
             )}
 
