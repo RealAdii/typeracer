@@ -128,10 +128,10 @@ export async function POST(req: NextRequest) {
       chainProvider.getChainId(),
     ]);
 
-    // Resource bounds
-    const l1Gas = { maxAmount: BigInt("0x100"), maxPrice: BigInt("0x100000000000000") };
-    const l2Gas = { maxAmount: BigInt("0x100000"), maxPrice: BigInt("0x1000000000") };
-    const l1DataGas = { maxAmount: BigInt("0x100"), maxPrice: BigInt("0x100000000000000") };
+    // Resource bounds (prices in FRI — STRK's smallest unit)
+    const l1Gas = { maxAmount: BigInt("0x200"), maxPrice: BigInt("0x100000000000") };
+    const l2Gas = { maxAmount: BigInt("0x200000"), maxPrice: BigInt("0x1000000000") };
+    const l1DataGas = { maxAmount: BigInt("0x200"), maxPrice: BigInt("0x100000000000") };
 
     // Compute transaction hash WITH l1_data_gas
     const txHash = computeInvokeV3Hash({
