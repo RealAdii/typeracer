@@ -7,6 +7,7 @@ interface WalletStatusProps {
   walletAddress: string | null;
   walletReady: boolean;
   xUsername?: string | null;
+  strkBalance?: number | null;
   onLogin: () => void;
   onLogout: () => void;
 }
@@ -21,6 +22,7 @@ export default function WalletStatus({
   walletAddress,
   walletReady,
   xUsername,
+  strkBalance,
   onLogin,
   onLogout,
 }: WalletStatusProps) {
@@ -46,6 +48,11 @@ export default function WalletStatus({
             >
               {truncate(walletAddress)}
             </a>
+            {strkBalance !== null && strkBalance !== undefined && (
+              <span style={{ color: "var(--text-primary)", fontWeight: 700 }}>
+                {strkBalance.toFixed(2)} STRK
+              </span>
+            )}
           </>
         ) : isAuthenticated ? (
           <span style={{ color: "#ffaa00" }}>

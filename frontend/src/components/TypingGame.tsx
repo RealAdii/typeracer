@@ -106,6 +106,7 @@ export default function TypingGame() {
 
   // Race limit tracking
   const [userRaceCount, setUserRaceCount] = useState(0);
+  const [strkBalance, setStrkBalance] = useState<number | null>(null);
   const isUnlimited = walletAddress ? UNLIMITED_RACE_ADDRESSES.includes(walletAddress.toLowerCase()) : false;
   const racesRemaining = isUnlimited ? 999 : GAME_CONFIG.MAX_RACES_PER_USER - userRaceCount;
 
@@ -231,6 +232,35 @@ export default function TypingGame() {
 
     fetchRaceCount();
   }, [walletAddress, gameState]); // Re-fetch when game state changes (after finishing)
+
+  // ─── Fetch STRK balance ───
+  useEffect(() => {
+    if (!walletAddress) return;
+    const fetchBalance = async () => {
+      try {
+        const { RpcProvider, Contract } = await import("starknet");
+        const provider = new RpcProvider({ nodeUrl: RPC_URL, blockIdentifier: "latest" as any });
+        const erc20 = new Contract(
+          [{
+            type: "function", name: "balanceOf",
+            inputs: [{ name: "account", type: "core::starknet::contract_address::ContractAddress" }],
+            outputs: [{ type: "core::integer::u256" }],
+            state_mutability: "view",
+          }],
+          "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d",
+          provider
+        );
+        const bal = await erc20.call("balanceOf", [walletAddress], { blockIdentifier: "latest" as any });
+        const raw = BigInt(Array.isArray(bal) ? bal[0] : (bal as any));
+        setStrkBalance(Number(raw) / 1e18);
+      } catch (err) {
+        console.error("Failed to fetch STRK balance:", err);
+      }
+    };
+    fetchBalance();
+    const iv = setInterval(fetchBalance, 15000); // refresh every 15s
+    return () => clearInterval(iv);
+  }, [walletAddress, gameState]);
 
   // ─── Countdown Timer ───
   useEffect(() => {
@@ -465,6 +495,7 @@ export default function TypingGame() {
         walletAddress={walletAddress}
         walletReady={isReady}
         xUsername={xUsername}
+        strkBalance={strkBalance}
         onLogin={login}
         onLogout={async () => {
           if (wallet) {
@@ -665,6 +696,7 @@ export default function TypingGame() {
               }}
               onViewLeaderboard={() => { setGameState("idle"); setShowLeaderboard(true); }}
               onSendPrivately={() => {
+                setGameState("idle");
                 tongo.reset();
                 setShowPrivateSend(true);
               }}
