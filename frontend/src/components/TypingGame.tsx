@@ -663,7 +663,7 @@ export default function TypingGame() {
                 setCurrentWordIndex(0);
                 setCompletedWords(0);
               }}
-              onViewLeaderboard={() => setShowLeaderboard(true)}
+              onViewLeaderboard={() => { setGameState("idle"); setShowLeaderboard(true); }}
               onSendPrivately={() => {
                 tongo.reset();
                 setShowPrivateSend(true);
