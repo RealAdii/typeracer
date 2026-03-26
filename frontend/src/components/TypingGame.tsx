@@ -20,7 +20,6 @@ import {
   NETWORK,
   GAME_CONFIG,
   STORAGE_KEYS,
-  UNLIMITED_RACE_ADDRESSES,
 } from "@/lib/constants";
 
 type GameState = "idle" | "countdown" | "racing" | "finished";
@@ -104,11 +103,11 @@ export default function TypingGame() {
     startTimeRef.current = startTime;
   }, [startTime]);
 
-  // Race limit tracking
+  // Race limit tracking (client-side via localStorage)
   const [userRaceCount, setUserRaceCount] = useState(0);
   const [strkBalance, setStrkBalance] = useState<number | null>(null);
-  const isUnlimited = walletAddress ? UNLIMITED_RACE_ADDRESSES.includes(walletAddress.toLowerCase()) : false;
-  const racesRemaining = isUnlimited ? 999 : GAME_CONFIG.MAX_RACES_PER_USER - userRaceCount;
+  const [clientRaceAttempts, setClientRaceAttempts] = useState(0);
+  const racesRemaining = GAME_CONFIG.MAX_RACES_PER_USER - clientRaceAttempts;
 
   const {
     startRace,
@@ -240,6 +239,15 @@ export default function TypingGame() {
     const stored = localStorage.getItem(key);
     if (stored) setStrkBalance(parseFloat(stored));
     else setStrkBalance(0);
+  }, [walletAddress]);
+
+  // ─── Load client-side race attempts from localStorage ───
+  useEffect(() => {
+    if (!walletAddress) return;
+    const key = `typeracer_attempts_${walletAddress.toLowerCase()}`;
+    const stored = localStorage.getItem(key);
+    if (stored) setClientRaceAttempts(parseInt(stored, 10));
+    else setClientRaceAttempts(0);
   }, [walletAddress]);
 
   // ─── Countdown Timer ───
@@ -389,11 +397,20 @@ export default function TypingGame() {
     setCountdown(GAME_CONFIG.COUNTDOWN_SECONDS);
     setGameState("countdown");
 
+    // Increment client-side race attempts
+    if (walletAddress) {
+      const key = `typeracer_attempts_${walletAddress.toLowerCase()}`;
+      const prev = parseInt(localStorage.getItem(key) || "0", 10);
+      const next = prev + 1;
+      localStorage.setItem(key, String(next));
+      setClientRaceAttempts(next);
+    }
+
     const raceId = await startRace(0);
     if (!raceId && raceId !== "0") {
       console.warn("On-chain start_race failed, continuing locally");
     }
-  }, [startRace, clearLog]);
+  }, [startRace, clearLog, walletAddress]);
 
   // ─── Handle Keystroke (word-level) ───
   // Use refs for the hot path to avoid stale closures when typing fast
