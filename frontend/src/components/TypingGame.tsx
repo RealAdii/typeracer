@@ -684,27 +684,11 @@ export default function TypingGame() {
       <div className="footer">
         Powered by{" "}
         <a
-          href="https://github.com/0xsisyfos/starkzap"
+          href="https://starkzap.io"
           target="_blank"
           rel="noopener noreferrer"
         >
-          Starkzap SDK
-        </a>{" "}
-        | Deployed on{" "}
-        <a
-          href="https://www.starknet.io"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Starknet
-        </a>{" "}
-        | Auth by{" "}
-        <a
-          href="https://privy.io"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Privy
+          StarkZap
         </a>
       </div>
 
