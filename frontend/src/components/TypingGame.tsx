@@ -489,9 +489,9 @@ export default function TypingGame() {
     <>
       {/* Header */}
       <div className="header">
-        <h1 className="site-title">who&apos;s the fastest on CT</h1>
+        <h1 className="site-title">EARN MONEY FOR TYPING</h1>
         <div className="subtitle">
-          Earn STRK for every word you type correctly
+          EARN MONEY FOR TYPING
         </div>
       </div>
 
