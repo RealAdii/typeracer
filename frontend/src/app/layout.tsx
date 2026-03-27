@@ -5,25 +5,25 @@ import "./globals.css";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Who's the Fastest on CT | Every Keystroke is a Transaction",
+  title: "Earn Money For Typing",
   description:
-    "Competitive typing speed game on Starknet. Race against others, type fast, earn STRK. Every keystroke is provably on-chain. Powered by StarkZap.",
+    "Type fast, earn STRK. Every keystroke is an on-chain transaction on Starknet. Powered by StarkZap.",
   icons: {
     icon: "/favicon.svg",
   },
   openGraph: {
-    title: "Who's the Fastest on CT?",
+    title: "Earn Money For Typing",
     description:
-      "Race against others on Starknet. Every keystroke fires an on-chain transaction. Type fast, earn STRK.",
-    images: [{ url: "/og-image.svg", width: 1200, height: 630 }],
+      "Type fast, earn STRK. Every keystroke is an on-chain transaction on Starknet.",
+    images: [{ url: "/og.png", width: 1920, height: 1080 }],
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Who's the Fastest on CT?",
+    title: "Earn Money For Typing",
     description:
-      "Race against others on Starknet. Every keystroke fires an on-chain transaction. Type fast, earn STRK.",
-    images: ["/og-image.svg"],
+      "Type fast, earn STRK. Every keystroke is an on-chain transaction on Starknet.",
+    images: ["/og.png"],
   },
 };
 
