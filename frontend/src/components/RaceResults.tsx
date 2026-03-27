@@ -31,6 +31,7 @@ interface RaceResultsProps {
   strkPerWord: number;
   onRaceAgain: () => void;
   onViewLeaderboard: () => void;
+  onSendStrk?: () => void;
   onSendPrivately?: () => void;
 }
 
@@ -97,6 +98,7 @@ export default function RaceResults({
   strkPerWord,
   onRaceAgain,
   onViewLeaderboard,
+  onSendStrk,
   onSendPrivately,
 }: RaceResultsProps) {
   const elapsedSec = Math.round(elapsedMs / 1000);
@@ -228,6 +230,14 @@ export default function RaceResults({
         <button className="btn btn-secondary" onClick={onViewLeaderboard}>
           Leaderboard
         </button>
+        {rewardResult?.success && onSendStrk && (
+          <button
+            className="btn btn-secondary"
+            onClick={onSendStrk}
+          >
+            Send STRK
+          </button>
+        )}
         {rewardResult?.success && onSendPrivately && (
           <button
             className="btn btn-secondary"

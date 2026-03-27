@@ -10,8 +10,10 @@ import RaceResults from "./RaceResults";
 import Leaderboard from "./Leaderboard";
 import WalletStatus from "./WalletStatus";
 import PrivateSend from "./PrivateSend";
+import SimpleSend from "./SimpleSend";
 import { useTypingContract } from "@/hooks/use-typing-contract";
 import { useTongo } from "@/hooks/use-tongo";
+import { useSimpleSend } from "@/hooks/use-simple-send";
 import { generateChallenge, type GeneratedChallenge } from "@/lib/challenges";
 import {
   API_URL,
@@ -124,7 +126,9 @@ export default function TypingGame() {
   } = useTypingContract({ wallet, getAccessToken });
 
   const [showPrivateSend, setShowPrivateSend] = useState(false);
+  const [showSimpleSend, setShowSimpleSend] = useState(false);
   const tongo = useTongo({ wallet, walletAddress });
+  const simpleSend = useSimpleSend({ wallet, walletAddress });
 
   // ─── Wallet Setup (Privy → Starkzap) ───
   useEffect(() => {
@@ -588,6 +592,17 @@ export default function TypingGame() {
                   <button
                     className="btn btn-secondary"
                     onClick={() => {
+                      simpleSend.reset();
+                      setShowSimpleSend(true);
+                    }}
+                  >
+                    Send STRK
+                  </button>
+                )}
+                {authenticated && walletAddress && (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => {
                       tongo.reset();
                       setShowPrivateSend(true);
                     }}
@@ -704,6 +719,11 @@ export default function TypingGame() {
                 setCompletedWords(0);
               }}
               onViewLeaderboard={() => { setGameState("idle"); setShowLeaderboard(true); }}
+              onSendStrk={() => {
+                setGameState("idle");
+                simpleSend.reset();
+                setShowSimpleSend(true);
+              }}
               onSendPrivately={() => {
                 setGameState("idle");
                 tongo.reset();
@@ -736,6 +756,18 @@ export default function TypingGame() {
       {/* Leaderboard Modal */}
       {showLeaderboard && (
         <Leaderboard onClose={() => setShowLeaderboard(false)} />
+      )}
+
+      {/* Simple Send Modal */}
+      {showSimpleSend && walletAddress && (
+        <SimpleSend
+          walletAddress={walletAddress}
+          step={simpleSend.step}
+          error={simpleSend.error}
+          txHash={simpleSend.txHash}
+          onSend={(recipient, amount) => simpleSend.send(recipient, amount)}
+          onClose={() => setShowSimpleSend(false)}
+        />
       )}
 
       {/* Private Send Modal */}
