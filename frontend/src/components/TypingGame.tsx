@@ -107,8 +107,7 @@ export default function TypingGame() {
   const [userRaceCount, setUserRaceCount] = useState(0);
   const [strkBalance, setStrkBalance] = useState<number | null>(null);
   const [clientRaceAttempts, setClientRaceAttempts] = useState(0);
-  const effectiveAttempts = Math.max(clientRaceAttempts, userRaceCount);
-  const racesRemaining = GAME_CONFIG.MAX_RACES_PER_USER - effectiveAttempts;
+  const racesRemaining = GAME_CONFIG.MAX_RACES_PER_USER - clientRaceAttempts;
 
   const {
     startRace,
