@@ -407,7 +407,10 @@ export default function TypingGame() {
 
     const raceId = await startRace(0);
     if (!raceId && raceId !== "0") {
-      console.warn("On-chain start_race failed, continuing locally");
+      // On-chain start failed (likely race limit exceeded) — abort
+      setGameState("idle");
+      alert("Race could not start on-chain. You may have used all your races.");
+      return;
     }
   }, [startRace, clearLog, walletAddress]);
 
