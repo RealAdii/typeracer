@@ -43,7 +43,7 @@ export function useSimpleSend({ wallet, walletAddress }: UseSimpleSendOpts) {
             entrypoint: "transfer",
             calldata: [recipientAddress, low, high],
           },
-        ]);
+        ], { feeMode: "user_pays" });
 
         await tx.wait();
         setTxHash(tx.hash);
