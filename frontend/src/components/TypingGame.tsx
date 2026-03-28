@@ -14,6 +14,7 @@ import SimpleSend from "./SimpleSend";
 import { useTypingContract } from "@/hooks/use-typing-contract";
 import { useTongo } from "@/hooks/use-tongo";
 import { useSimpleSend } from "@/hooks/use-simple-send";
+import { useCartridge } from "@/hooks/use-cartridge";
 import { generateChallenge, type GeneratedChallenge } from "@/lib/challenges";
 import {
   API_URL,
@@ -129,6 +130,16 @@ export default function TypingGame() {
   const [showSimpleSend, setShowSimpleSend] = useState(false);
   const tongo = useTongo({ wallet, walletAddress });
   const simpleSend = useSimpleSend({ wallet, walletAddress });
+  const cartridge = useCartridge();
+
+  // ─── Cartridge Login Handler ───
+  const handleCartridgeLogin = useCallback(async () => {
+    const cWallet = await cartridge.connect();
+    if (cWallet) {
+      setWallet(cWallet);
+      setWalletAddress(cWallet.address);
+    }
+  }, [cartridge]);
 
   // ─── Wallet Setup (Privy → Starkzap) ───
   useEffect(() => {
@@ -516,6 +527,7 @@ export default function TypingGame() {
               await wallet.disconnect();
             } catch {}
           }
+          await cartridge.disconnect();
           setWallet(null);
           setWalletAddress(null);
           setXUsername(null);
@@ -540,15 +552,27 @@ export default function TypingGame() {
                 provably recorded on the blockchain.
               </p>
 
-              {!authenticated && (
-                <div style={{ marginBottom: 24 }}>
+              {!authenticated && !wallet && (
+                <div style={{ marginBottom: 24, display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
                   <button className="btn btn-large" onClick={login}>
-                    Connect to Start
+                    Login with Twitter
+                  </button>
+                  <button
+                    className="btn btn-large"
+                    onClick={handleCartridgeLogin}
+                    disabled={cartridge.step === "connecting"}
+                    style={{ background: "transparent", borderColor: "var(--text-primary)" }}
+                  >
+                    {cartridge.step === "connecting" ? (
+                      <><span className="spinner" /> Connecting...</>
+                    ) : (
+                      "Login"
+                    )}
                   </button>
                 </div>
               )}
 
-              {authenticated && (
+              {(authenticated || wallet) && (
                 <>
                   <button
                     className="btn btn-large"
@@ -588,7 +612,7 @@ export default function TypingGame() {
                 >
                   View Leaderboard
                 </button>
-                {authenticated && walletAddress && (
+                {(authenticated || wallet) && walletAddress && (
                   <button
                     className="btn btn-secondary"
                     onClick={() => {
@@ -599,7 +623,7 @@ export default function TypingGame() {
                     Send STRK
                   </button>
                 )}
-                {authenticated && walletAddress && (
+                {(authenticated || wallet) && walletAddress && (
                   <button
                     className="btn btn-secondary"
                     onClick={() => {
