@@ -64,7 +64,7 @@ export default function WalletStatus({
       </div>
 
       <div>
-        {(isAuthenticated || walletAddress) ? (
+        {isAuthenticated ? (
           <button className="btn btn-secondary" onClick={onLogout}>
             Disconnect
           </button>
